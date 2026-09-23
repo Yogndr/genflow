@@ -72,6 +72,7 @@ public class SecurityConfig {
                     "/api/health",
                     "/api/auth/register",
                     "/api/auth/login",
+                    
 
                     // Swagger / OpenAPI
                     "/swagger-ui/**",

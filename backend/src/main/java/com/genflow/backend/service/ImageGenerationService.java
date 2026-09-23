@@ -18,6 +18,8 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 
+import com.genflow.backend.dto.CloudinaryUploadResult;
+
 import java.time.LocalDateTime;
 
 @Service
@@ -26,19 +28,19 @@ public class ImageGenerationService {
     private final ImageGenerationRepository imageGenerationRepository;
     private final UserRepository userRepository;
     private final HuggingFaceImageService huggingFaceImageService;
-    private final CloudinaryService cloudinaryService;
+    private final S3StorageService s3StorageService;
 
     public ImageGenerationService(
-            ImageGenerationRepository imageGenerationRepository,
-            UserRepository userRepository,
-            HuggingFaceImageService huggingFaceImageService,
-            CloudinaryService cloudinaryService
-    ) {
-        this.imageGenerationRepository = imageGenerationRepository;
-        this.userRepository = userRepository;
-        this.huggingFaceImageService = huggingFaceImageService;
-        this.cloudinaryService = cloudinaryService;
-    }
+        ImageGenerationRepository imageGenerationRepository,
+        UserRepository userRepository,
+        HuggingFaceImageService huggingFaceImageService,
+        S3StorageService s3StorageService
+) {
+    this.imageGenerationRepository = imageGenerationRepository;
+    this.userRepository = userRepository;
+    this.huggingFaceImageService = huggingFaceImageService;
+    this.s3StorageService = s3StorageService;
+}
 
     // Generate a new AI image
     public ImageGenerationResponse generateImage(
@@ -75,12 +77,12 @@ public class ImageGenerationService {
                     );
 
             // 2. Upload generated image to Cloudinary
-            CloudinaryUploadResult uploadResult =
-                    cloudinaryService.uploadImage(imageBytes);
+           // 2. Upload generated image to AWS S3
+String s3Key = s3StorageService.uploadImage(imageBytes);
 
-            // 3. Store Cloudinary information
-            saved.setImageUrl(uploadResult.getImageUrl());
-            saved.setPublicId(uploadResult.getPublicId());
+// 3. Store S3 object key
+saved.setImageUrl(s3Key);
+saved.setPublicId(s3Key);
 
             saved.setStatus("COMPLETED");
             saved.setUpdatedAt(LocalDateTime.now());
@@ -223,14 +225,14 @@ public class ImageGenerationService {
         }
 
         // Delete actual image from Cloudinary
-        if (image.getPublicId() != null &&
-                !image.getPublicId().isBlank()) {
+        // Delete actual image from AWS S3
+if (image.getPublicId() != null &&
+        !image.getPublicId().isBlank()) {
 
-            cloudinaryService.deleteImage(
-                    image.getPublicId()
-            );
-        }
-
+    s3StorageService.deleteFile(
+            image.getPublicId()
+    );
+}
         // Delete PostgreSQL record
         imageGenerationRepository.delete(image);
     }
@@ -255,17 +257,27 @@ public class ImageGenerationService {
     }
 
     // Convert entity to response DTO
-    private ImageGenerationResponse toResponse(
-            ImageGeneration image
-    ) {
+  private ImageGenerationResponse toResponse(
+        ImageGeneration image
+) {
 
-        return new ImageGenerationResponse(
-                image.getId(),
-                image.getPrompt(),
-                image.getImageUrl(),
-                image.getStatus(),
-                image.getCreatedAt(),
-                image.getUpdatedAt()
+    String imageUrl = null;
+
+    if (image.getImageUrl() != null &&
+            !image.getImageUrl().isBlank()) {
+
+        imageUrl = s3StorageService.generatePresignedUrl(
+                image.getImageUrl()
         );
     }
+
+    return new ImageGenerationResponse(
+            image.getId(),
+            image.getPrompt(),
+            imageUrl,
+            image.getStatus(),
+            image.getCreatedAt(),
+            image.getUpdatedAt()
+    );
+}
 }
