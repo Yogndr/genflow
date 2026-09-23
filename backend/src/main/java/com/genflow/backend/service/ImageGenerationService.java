@@ -1,6 +1,6 @@
 package com.genflow.backend.service;
 
-import com.genflow.backend.dto.CloudinaryUploadResult;
+
 import com.genflow.backend.dto.ImageGenerationRequest;
 import com.genflow.backend.dto.ImageGenerationResponse;
 import com.genflow.backend.entity.ImageGeneration;
@@ -18,7 +18,7 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 
-import com.genflow.backend.dto.CloudinaryUploadResult;
+
 
 import java.time.LocalDateTime;
 
@@ -76,7 +76,7 @@ public class ImageGenerationService {
                             request.getPrompt()
                     );
 
-            // 2. Upload generated image to Cloudinary
+           
            // 2. Upload generated image to AWS S3
 String s3Key = s3StorageService.uploadImage(imageBytes);
 
@@ -197,7 +197,7 @@ saved.setPublicId(s3Key);
         return toResponse(image);
     }
 
-    // Delete image from Cloudinary and PostgreSQL
+    // Delete image from AWS S3 and PostgreSQL
     public void deleteImage(Long id) {
 
         Authentication authentication =
@@ -224,7 +224,7 @@ saved.setPublicId(s3Key);
             );
         }
 
-        // Delete actual image from Cloudinary
+        
         // Delete actual image from AWS S3
 if (image.getPublicId() != null &&
         !image.getPublicId().isBlank()) {

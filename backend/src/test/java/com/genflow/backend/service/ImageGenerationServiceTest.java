@@ -1,10 +1,10 @@
 package com.genflow.backend.service;
 
-import com.genflow.backend.dto.CloudinaryUploadResult;
 import com.genflow.backend.dto.ImageGenerationRequest;
 import com.genflow.backend.dto.ImageGenerationResponse;
 import com.genflow.backend.entity.ImageGeneration;
 import com.genflow.backend.entity.User;
+import com.genflow.backend.exception.ForbiddenException;
 import com.genflow.backend.repository.ImageGenerationRepository;
 import com.genflow.backend.repository.UserRepository;
 
@@ -25,7 +25,6 @@ import java.util.Optional;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
-import com.genflow.backend.exception.ForbiddenException;
 
 @ExtendWith(MockitoExtension.class)
 class ImageGenerationServiceTest {
@@ -40,7 +39,7 @@ class ImageGenerationServiceTest {
     private HuggingFaceImageService huggingFaceImageService;
 
     @Mock
-    private CloudinaryService cloudinaryService;
+    private S3StorageService s3StorageService;
 
     @InjectMocks
     private ImageGenerationService imageGenerationService;
@@ -84,11 +83,11 @@ class ImageGenerationServiceTest {
         byte[] fakeImageBytes =
                 "fake-image".getBytes();
 
-        CloudinaryUploadResult uploadResult =
-                new CloudinaryUploadResult(
-                        "https://cloudinary.com/test-image.jpg",
-                        "genflow/test-image"
-                );
+        String s3Key =
+                "generated-images/test-image.png";
+
+        String presignedUrl =
+                "https://s3-presigned-url.example/test-image.png";
 
         when(
                 userRepository.findByEmail(
@@ -103,8 +102,12 @@ class ImageGenerationServiceTest {
         ).thenReturn(fakeImageBytes);
 
         when(
-                cloudinaryService.uploadImage(fakeImageBytes)
-        ).thenReturn(uploadResult);
+                s3StorageService.uploadImage(fakeImageBytes)
+        ).thenReturn(s3Key);
+
+        when(
+                s3StorageService.generatePresignedUrl(s3Key)
+        ).thenReturn(presignedUrl);
 
         when(
                 imageGenerationRepository.save(
@@ -127,7 +130,7 @@ class ImageGenerationServiceTest {
         );
 
         assertEquals(
-                "https://cloudinary.com/test-image.jpg",
+                presignedUrl,
                 response.getImageUrl()
         );
 
@@ -142,8 +145,11 @@ class ImageGenerationServiceTest {
                         "A futuristic city at night"
                 );
 
-        verify(cloudinaryService)
+        verify(s3StorageService)
                 .uploadImage(fakeImageBytes);
+
+        verify(s3StorageService)
+                .generatePresignedUrl(s3Key);
 
         verify(
                 imageGenerationRepository,
@@ -152,84 +158,92 @@ class ImageGenerationServiceTest {
     }
 
     @Test
-void deleteImage_shouldDeleteFromCloudinaryAndDatabase() {
+    void deleteImage_shouldDeleteFromS3AndDatabase() {
 
-    // Arrange
-    ImageGeneration image = new ImageGeneration();
+        // Arrange
+        String s3Key =
+                "generated-images/test-image.png";
 
-    image.setId(10L);
-    image.setUser(user);
-    image.setPrompt("Test image");
-    image.setImageUrl(
-            "https://cloudinary.com/test-image.jpg"
-    );
-    image.setPublicId("genflow/test-image");
-    image.setStatus("COMPLETED");
+        ImageGeneration image =
+                new ImageGeneration();
 
-    when(
-            userRepository.findByEmail("test@example.com")
-    ).thenReturn(Optional.of(user));
+        image.setId(10L);
+        image.setUser(user);
+        image.setPrompt("Test image");
+        image.setImageUrl(s3Key);
+image.setPublicId(s3Key);
+image.setStatus("COMPLETED");
 
-    when(
-            imageGenerationRepository.findById(10L)
-    ).thenReturn(Optional.of(image));
+        when(
+                userRepository.findByEmail(
+                        "test@example.com"
+                )
+        ).thenReturn(Optional.of(user));
 
-    // Act
-    imageGenerationService.deleteImage(10L);
+        when(
+                imageGenerationRepository.findById(10L)
+        ).thenReturn(Optional.of(image));
 
-    // Assert / Verify
-    verify(cloudinaryService)
-            .deleteImage("genflow/test-image");
+        // Act
+        imageGenerationService.deleteImage(10L);
 
-    verify(imageGenerationRepository)
-            .delete(image);
-}
+        // Assert / Verify
+        verify(s3StorageService)
+                .deleteFile(s3Key);
 
-@Test
-void deleteImage_shouldThrowForbiddenWhenImageBelongsToAnotherUser() {
+        verify(imageGenerationRepository)
+                .delete(image);
+    }
 
-    // Arrange
-    User anotherUser = new User();
-    anotherUser.setId(2L);
-    anotherUser.setEmail("another@example.com");
+    @Test
+    void deleteImage_shouldThrowForbiddenWhenImageBelongsToAnotherUser() {
 
-    ImageGeneration image = new ImageGeneration();
+        // Arrange
+        User anotherUser = new User();
+        anotherUser.setId(2L);
+        anotherUser.setEmail("another@example.com");
 
-    image.setId(10L);
-    image.setUser(anotherUser);
-    image.setPrompt("Another user's image");
-    image.setPublicId("genflow/another-image");
+        ImageGeneration image =
+                new ImageGeneration();
 
-    when(
-            userRepository.findByEmail("test@example.com")
-    ).thenReturn(Optional.of(user));
+        image.setId(10L);
+        image.setUser(anotherUser);
+        image.setPrompt("Another user's image");
+        image.setImageUrl(
+                "generated-images/another-image.png"
+        );
 
-    when(
-            imageGenerationRepository.findById(10L)
-    ).thenReturn(Optional.of(image));
+        when(
+                userRepository.findByEmail(
+                        "test@example.com"
+                )
+        ).thenReturn(Optional.of(user));
 
-    // Act + Assert
-    ForbiddenException exception =
-            assertThrows(
-                    ForbiddenException.class,
-                    () -> imageGenerationService.deleteImage(10L)
-            );
+        when(
+                imageGenerationRepository.findById(10L)
+        ).thenReturn(Optional.of(image));
 
-    assertEquals(
-            "You are not authorized to delete this image",
-            exception.getMessage()
-    );
+        // Act + Assert
+        ForbiddenException exception =
+                assertThrows(
+                        ForbiddenException.class,
+                        () -> imageGenerationService.deleteImage(10L)
+                );
 
-    // Most important checks:
-    // neither Cloudinary nor PostgreSQL should be touched.
-    verify(
-            cloudinaryService,
-            never()
-    ).deleteImage(anyString());
+        assertEquals(
+                "You are not authorized to delete this image",
+                exception.getMessage()
+        );
 
-    verify(
-            imageGenerationRepository,
-            never()
-    ).delete(any(ImageGeneration.class));
-}
+        // Neither S3 nor PostgreSQL should be touched
+        verify(
+                s3StorageService,
+                never()
+        ).deleteFile(anyString());
+
+        verify(
+                imageGenerationRepository,
+                never()
+        ).delete(any(ImageGeneration.class));
+    }
 }
